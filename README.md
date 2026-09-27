@@ -27,6 +27,14 @@ This is a working **vertical slice**, not the finished brief:
 Deliberately **not** built yet (the remaining ✅ items in the brief): group chats,
 typing indicators, file/image sharing, browser push notifications, and deployment.
 
+### Status
+
+Work in progress. The Prisma schema validates, every server module loads, and the
+React client builds — but **the app has not yet been run end to end**, because it
+still needs SQL Server installed locally. Steps 1–4 below have not been executed
+on the machine this was written on. Treat it as a vertical slice to finish, not a
+finished demo.
+
 ---
 
 ## Prerequisites
