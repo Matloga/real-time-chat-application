@@ -1,0 +1,91 @@
+// Prisma schema for Microsoft SQL Server.
+//
+// Two notes on SQL Server specifically:
+//  1. Prisma does not support native enums on SQL Server, so conversation types
+//     are stored as strings and constrained in application code (utils/constants.js).
+//  2. Prisma does not support `@db.Text` with unbounded length on SQL Server the
+//     way Postgres does, so message bodies use nvarchar(4000).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.UniqueIdentifier
+  username     String   @unique @db.VarChar(32)
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @db.VarChar(255)
+  displayName  String   @db.VarChar(64)
+  avatarColor  String   @default("#4f6bed") @db.VarChar(9)
+  lastSeenAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  memberships          ConversationMember[]
+  messages             Message[]
+  createdConversations Conversation[]       @relation("ConversationCreator")
+
+  @@map("users")
+}
+
+model Conversation {
+  id          String   @id @default(uuid()) @db.UniqueIdentifier
+  /// "DIRECT" or "GROUP" - see CONVERSATION_TYPE in utils/constants.js
+  type        String   @default("DIRECT") @db.VarChar(16)
+  /// Null for DIRECT conversations, required for GROUP.
+  name        String?  @db.VarChar(64)
+  /// Deterministic "smallerId:largerId" key, used to guarantee a user pair can
+  /// only ever have one DIRECT conversation. Unique index doubles as dedupe guard.
+  directKey   String?  @unique @db.VarChar(73)
+  createdById String   @db.UniqueIdentifier
+  createdAt   DateTime @default(now())
+
+  // NoAction rather than Cascade: deleting a user must not silently delete the
+  // conversations and messages they were part of. SQL Server also refuses
+  // multiple cascade paths between the same two tables.
+  createdBy User                 @relation("ConversationCreator", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  members   ConversationMember[]
+  messages  Message[]
+
+  @@index([createdById])
+  @@map("conversations")
+}
+
+model ConversationMember {
+  id             String   @id @default(uuid()) @db.UniqueIdentifier
+  conversationId String   @db.UniqueIdentifier
+  userId         String   @db.UniqueIdentifier
+  joinedAt       DateTime @default(now())
+  /// Last message the user has actually seen - drives unread counts cheaply.
+  lastReadAt     DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@map("conversation_members")
+}
+
+model Message {
+  id              String   @id @default(uuid()) @db.UniqueIdentifier
+  conversationId  String   @db.UniqueIdentifier
+  senderId        String   @db.UniqueIdentifier
+  body            String   @db.NVarChar(4000)
+  /// Client-generated id, unique per conversation. This is what stops a
+  /// retried/resent emit from creating a duplicate row.
+  clientMessageId String   @db.VarChar(64)
+  createdAt       DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sender       User         @relation(fields: [senderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([conversationId, clientMessageId])
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+  @@map("messages")
+}
